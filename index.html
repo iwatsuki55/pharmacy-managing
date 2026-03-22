@@ -266,6 +266,11 @@ function PatientMode({onSubmit}){
 /* ─── 薬剤師ダッシュボード ──────────────── */
 function PharmacistDashboard({patients,selId,onSelect,onSwitchToGuidance,onExportAll}){
   const [search,setSearch]=useState("");
+  const [checkedItems,setCheckedItems]=useState({});
+  const toggleCheck=(patientId,idx)=>{
+    const key=`${patientId}-${idx}`;
+    setCheckedItems(prev=>({...prev,[key]:!prev[key]}));
+  };
   const filtered=useMemo(()=>{
     if(!search.trim())return patients;
     const q=search.trim().toLowerCase();
@@ -422,21 +427,27 @@ function PharmacistDashboard({patients,selId,onSelect,onSwitchToGuidance,onExpor
             <div style={{...S.card,padding:"14px 18px",marginBottom:12}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                 <span style={{fontSize:13,fontWeight:600,color:C.text}}>薬歴記載チェックリスト</span>
-                <span style={{fontSize:11,color:C.light}}>{pt.guid?`${CHECKLIST.length}/${CHECKLIST.length} 完了`:"0 / 5 完了"}</span>
+                <span style={{fontSize:11,color:C.light}}>
+                  {CHECKLIST.filter((_,i)=>!!checkedItems[`${pt.id}-${i}`]).length} / {CHECKLIST.length} 完了
+                </span>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:7}}>
                 {CHECKLIST.map((item,i)=>{
-                  const done=!!pt.guid||(i<4&&!!pt.guid);
-                  const last=i===4&&!pt.guid;
+                  const checked=!!checkedItems[`${pt.id}-${i}`];
+                  const isLast=i===CHECKLIST.length-1;
                   return(
-                    <div key={item} style={{display:"flex",alignItems:"center",gap:9,fontSize:13,
-                      color:last?C.danger:pt.guid?C.light:C.text}}>
+                    <div key={item} onClick={()=>toggleCheck(pt.id,i)}
+                      style={{display:"flex",alignItems:"center",gap:9,fontSize:13,cursor:"pointer",
+                        color:checked?C.light:isLast&&!checked?C.danger:C.text,
+                        padding:"5px 4px",borderRadius:7}}>
                       <div style={{width:18,height:18,borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",
-                        background:pt.guid?C.teal:last?"transparent":C.bg,
-                        border:`1px solid ${pt.guid?C.teal:last?C.danger:C.border}`}}>
-                        {pt.guid&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>✓</span>}
+                        background:checked?C.teal:"transparent",
+                        border:`1.5px solid ${checked?C.teal:isLast&&!checked?C.danger:C.border}`,
+                        transition:"all .15s"}}>
+                        {checked&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>✓</span>}
                       </div>
-                      <span style={{textDecoration:pt.guid?"line-through":"none",fontWeight:last?600:400}}>{item}</span>
+                      <span style={{textDecoration:checked?"line-through":"none",
+                        fontWeight:isLast&&!checked?600:400}}>{item}</span>
                     </div>
                   );
                 })}
