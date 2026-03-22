@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>ファーマシー問診・投薬支援</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;font-family:'Hiragino Kaku Gothic ProN','Noto Sans JP','Yu Gothic',sans-serif;}
+body{background:#F0F4F8;color:#1C2B2A;}
+button{font-family:inherit;cursor:pointer;}
+button:disabled{opacity:.4;cursor:not-allowed;}
+input,textarea,select{font-family:inherit;}
+textarea{resize:vertical;}
+::-webkit-scrollbar{width:6px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:#C5D8D4;border-radius:3px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useCallback,useMemo} = React;
+
+/* ─── カラー定義 ─────────────────────────── */
+const C = {
+  teal:"#1D9E75", tealL:"#E1F5EE", tealM:"#0F6E56", tealD:"#085041",
+  tealB:"#9FE1CB",
+  bg:"#F0F4F8", white:"#FFFFFF",
+  border:"#D8E8E4", borderM:"#B8D4CE",
+  text:"#1C2B2A", mid:"#4A6360", light:"#8AA8A4",
+  danger:"#E24B4A", dangerL:"#FCEBEB", dangerB:"#F09595",
+  amber:"#BA7517", amberL:"#FAEEDA", amberB:"#FAC775",
+  blue:"#185FA5", blueL:"#E6F1FB",
+  green:"#3B6D11", greenL:"#EAF3DE",
+  shadow:"rgba(26,107,92,0.08)",
+};
+
+/* ─── 共通スタイル ────────────────────────── */
+const S = {
+  card:{background:C.white,borderRadius:14,boxShadow:`0 1px 8px ${C.shadow}`,border:`0.5px solid ${C.border}`},
+  label:{fontSize:12,fontWeight:600,color:C.mid,marginBottom:5,display:"block",letterSpacing:"0.04em"},
+  input:{width:"100%",border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 12px",fontSize:14,color:C.text,background:"#FAFCFC",outline:"none"},
+  inputFilled:{width:"100%",border:`1px solid ${C.tealB}`,borderRadius:9,padding:"9px 12px",fontSize:14,color:C.text,background:C.tealL,outline:"none"},
+  textarea:{width:"100%",border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 12px",fontSize:13,color:C.text,background:"#FAFCFC",outline:"none",lineHeight:1.6},
+  radioBtn:(on)=>({padding:"7px 15px",borderRadius:20,border:`1.5px solid ${on?C.teal:C.border}`,background:on?C.tealL:C.white,color:on?C.tealM:C.mid,fontWeight:on?600:400,fontSize:13,cursor:"pointer"}),
+  btnPrimary:{background:C.teal,color:"#fff",border:"none",borderRadius:10,padding:"11px 26px",fontSize:14,fontWeight:600,cursor:"pointer"},
+  btnOutline:{background:"transparent",color:C.teal,border:`1.5px solid ${C.teal}`,borderRadius:10,padding:"9px 20px",fontSize:13,fontWeight:600,cursor:"pointer"},
+  btnGray:{background:"#EEF3F1",color:C.mid,border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:600,cursor:"pointer"},
+  btnAccent:{background:C.amber,color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:600,cursor:"pointer"},
+  divider:{borderTop:`1px solid ${C.border}`,margin:"14px 0"},
+  badge:(type)=>{
+    const m={ok:{bg:C.tealL,color:C.tealM},warn:{bg:C.amberL,color:C.amber},danger:{bg:C.dangerL,color:C.danger},blue:{bg:C.blueL,color:C.blue},gray:{bg:"#EEF3F1",color:C.mid}};
+    const t=m[type]||m.gray;
+    return{background:t.bg,color:t.color,fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:10,display:"inline-block"};
+  },
+};
+
+/* ─── サンプルデータ ─────────────────────── */
+const INIT_PATIENTS = [
+  {id:1,no:"P001",name:"田中 花子",kana:"タナカ ハナコ",age:58,gender:"女性",bday:"1966-04-12",
+   allergy:"ペニシリン系",meds:"アムロジピン 5mg、アトルバスタチン 10mg",
+   symptoms:"血圧が高い、頭痛が続く",visitCount:12,lastVisit:"2025-02-14",
+   q:{done:true,alc:"時々",smk:"なし",prg:"なし",se:"なし",otc:"なし"},guid:null},
+  {id:2,no:"P002",name:"鈴木 一郎",kana:"スズキ イチロウ",age:72,gender:"男性",bday:"1952-09-03",
+   allergy:"なし",meds:"メトホルミン 500mg、ロスバスタチン 5mg",
+   symptoms:"血糖コントロール不良",visitCount:3,lastVisit:"2025-01-20",
+   q:{done:false},guid:null},
+];
+
+const TEMPLATES = [
+  {id:"ht",label:"降圧薬",text:"毎日同じ時間に服用してください。急に服用をやめないよう注意してください。めまいや立ちくらみがある場合は座って休み、症状が続く場合はご連絡ください。"},
+  {id:"dm",label:"糖尿病薬",text:"食事の直前または食後すぐに服用してください。低血糖症状（冷汗・動悸）が出たら糖分を摂取して医療機関へ連絡してください。"},
+  {id:"ab",label:"抗生物質",text:"処方された日数分を飲みきってください。症状が改善しても途中でやめないこと。胃腸症状が出る場合は食後服用も可能です。"},
+  {id:"lp",label:"脂質異常症",text:"毎日就寝前に服用してください。グレープフルーツは相互作用があるため避けてください。筋肉痛・脱力感が出た場合はご連絡ください。"},
+  {id:"pa",label:"鎮痛薬",text:"空腹時の服用は避けてください。1日の上限用量を守ってください。長期連用は避け、症状が続く場合はご相談ください。"},
+];
+
+const SE_ITEMS = [
+  "消化器症状（吐き気・腹痛・下痢）",
+  "皮膚症状（発疹・かゆみ）",
+  "頭痛・めまい",
+  "浮腫（むくみ）",
+  "血圧変動",
+  "アレルギー反応の懸念",
+  "筋肉痛・脱力感",
+];
+
+const KAZAN = [
+  {label:"服薬管理指導料（3）",point:"45点",key:"k1"},
+  {label:"かかりつけ薬剤師指導料",point:"76点",key:"k2"},
+  {label:"特定薬剤管理指導加算",point:"10点",key:"k3"},
+  {label:"吸入薬指導加算",point:"30点",key:"k4"},
+];
+
+const CHECKLIST = [
+  "主訴・症状を記録した",
+  "アレルギーを確認・記録した",
+  "服薬状況（アドヒアランス）を確認した",
+  "副作用の有無を確認した",
+  "指導内容を薬歴に記録する",
+];
+
+/* ─── NSIPS CSV ───────────────────────── */
+function toD(s){return(s||"").replace(/-/g,"");}
+function now8(){const d=new Date();return`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}`;}
+function nowF(){const d=new Date();return`${now8()}${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}${String(d.getSeconds()).padStart(2,"0")}`;}
+function esc(s){return`"${(s||"").replace(/"/g,'""')}"`;};
+
+function buildCSV(pts){
+  const lines=[];
+  const rno=String(Math.floor(Math.random()*9000)+1000).padStart(6,"0");
+  lines.push(["H","NSIPS","1.06",nowF(),"PHARMACY001",rno].join(","));
+  let cnt=1;
+  pts.forEach(p=>{
+    const q=p.q||{},g=p.guid||{};
+    const gc=p.gender==="男性"?"1":p.gender==="女性"?"2":"3";
+    lines.push(["P",p.no,esc(p.name),esc(p.kana||""),toD(p.bday),gc,esc(p.allergy!=="なし"?p.allergy:"")].join(","));cnt++;
+    if(q.done){lines.push(["Q",p.no,now8(),esc(p.symptoms||""),esc(p.meds||""),esc(q.alc||""),esc(q.smk||""),esc(q.prg||""),esc(q.se||"")].join(","));cnt++;}
+    if(g.note||g.ms){
+      const sl=Object.entries(g.ses||{}).filter(([,v])=>v).map(([k])=>k).join("／");
+      lines.push(["I",p.no,now8(),esc(g.ms||""),esc(sl),esc(g.note||""),toD(g.nf||"")].join(","));cnt++;
+    }
+  });
+  lines.push(["E",cnt+1].join(","));
+  return lines.join("\r\n");
+}
+
+function dlCSV(content,filename){
+  const blob=new Blob(["\uFEFF"+content],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;a.download=filename;a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ─── 患者モード ─────────────────────── */
+function PatientMode({onSubmit}){
+  const [step,setStep]=useState(0);
+  const [f,setF]=useState({name:"",age:"",gender:"",allergy:"",meds:"",otc:"",symptoms:"",alc:"",smk:"",prg:"",se:"",seD:""});
+  const set=(k,v)=>setF(x=>({...x,[k]:v}));
+
+  const steps=[
+    /* Step 0: 基本情報 */
+    <div key="s0">
+      <div style={{fontSize:15,fontWeight:600,color:C.text,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+        <span style={{width:28,height:28,borderRadius:"50%",background:C.tealL,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:14}}>👤</span>
+        基本情報
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+        <div><label style={S.label}>お名前</label><input style={S.input} value={f.name} onChange={e=>set("name",e.target.value)} placeholder="例：山田 太郎"/></div>
+        <div><label style={S.label}>年齢</label><input style={S.input} type="number" value={f.age} onChange={e=>set("age",e.target.value)} placeholder="45"/></div>
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={S.label}>性別</label>
+        <div style={{display:"flex",gap:8}}>{["男性","女性","その他"].map(g=><button key={g} style={S.radioBtn(f.gender===g)} onClick={()=>set("gender",g)}>{g}</button>)}</div>
+      </div>
+    </div>,
+
+    /* Step 1: お薬・アレルギー */
+    <div key="s1">
+      <div style={{fontSize:15,fontWeight:600,color:C.text,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+        <span style={{width:28,height:28,borderRadius:"50%",background:C.tealL,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:14}}>💊</span>
+        お薬・アレルギー
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={S.label}>現在服用中のお薬（なければ「なし」）</label>
+        <textarea style={{...S.textarea,minHeight:70}} value={f.meds} onChange={e=>set("meds",e.target.value)} placeholder="例：アムロジピン 5mg、メトホルミン 500mg"/>
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={S.label}>アレルギー（薬・食べ物 ― なければ「なし」）</label>
+        <input style={f.allergy&&f.allergy!=="なし"?S.inputFilled:S.input} value={f.allergy} onChange={e=>set("allergy",e.target.value)} placeholder="例：ペニシリン系抗生物質（なければ「なし」）"/>
+        {f.allergy&&f.allergy!=="なし"&&(
+          <div style={{background:C.dangerL,border:`1px solid ${C.dangerB}`,borderRadius:9,padding:"8px 12px",color:"#A32D2D",fontSize:13,marginTop:6,display:"flex",alignItems:"center",gap:6}}>
+            <span style={{width:8,height:8,borderRadius:"50%",background:C.danger,flexShrink:0,display:"inline-block"}}/>
+            アレルギーが入力されています。薬剤師が確認します。
+          </div>
+        )}
+      </div>
+      <div>
+        <label style={S.label}>市販薬・サプリメントの使用</label>
+        <div style={{display:"flex",gap:8}}>{["なし","使用中あり"].map(v=><button key={v} style={S.radioBtn(f.otc===v)} onClick={()=>set("otc",v)}>{v}</button>)}</div>
+      </div>
+    </div>,
+
+    /* Step 2: 症状・生活習慣 */
+    <div key="s2">
+      <div style={{fontSize:15,fontWeight:600,color:C.text,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+        <span style={{width:28,height:28,borderRadius:"50%",background:C.tealL,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🩺</span>
+        症状・生活習慣
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={S.label}>今日の主な症状・お悩み</label>
+        <textarea style={{...S.textarea,minHeight:70}} value={f.symptoms} onChange={e=>set("symptoms",e.target.value)} placeholder="例：頭痛が続いている、血圧が高めと言われた"/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+        <div>
+          <label style={S.label}>飲酒</label>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{["なし","時々","毎日"].map(v=><button key={v} style={S.radioBtn(f.alc===v)} onClick={()=>set("alc",v)}>{v}</button>)}</div>
+        </div>
+        <div>
+          <label style={S.label}>喫煙</label>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{["なし","過去あり","現在あり"].map(v=><button key={v} style={S.radioBtn(f.smk===v)} onClick={()=>set("smk",v)}>{v}</button>)}</div>
+        </div>
+      </div>
+      <div>
+        <label style={S.label}>妊娠の可能性</label>
+        <div style={{display:"flex",gap:8}}>{["なし","あり","不明"].map(v=><button key={v} style={S.radioBtn(f.prg===v)} onClick={()=>set("prg",v)}>{v}</button>)}</div>
+      </div>
+    </div>,
+
+    /* Step 3: 副作用確認 */
+    <div key="s3">
+      <div style={{fontSize:15,fontWeight:600,color:C.text,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+        <span style={{width:28,height:28,borderRadius:"50%",background:C.amberL,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:14}}>⚠️</span>
+        副作用・確認事項
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={S.label}>前回のお薬で副作用はありましたか？</label>
+        <div style={{display:"flex",gap:8}}>{["なし","あった"].map(v=><button key={v} style={S.radioBtn(f.se===v)} onClick={()=>set("se",v)}>{v}</button>)}</div>
+      </div>
+      {f.se==="あった"&&(
+        <div style={{marginBottom:14}}>
+          <label style={S.label}>どのような症状でしたか？</label>
+          <textarea style={{...S.textarea,minHeight:60}} value={f.seD} onChange={e=>set("seD",e.target.value)} placeholder="例：発疹が出た、胃がむかむかした"/>
+        </div>
+      )}
+      <div style={{background:C.tealL,border:`1px solid ${C.tealB}`,borderRadius:9,padding:"11px 14px",color:C.tealM,fontSize:13,lineHeight:1.6}}>
+        入力内容は薬剤師のみ確認します。正確にお答えください。<br/>
+        ご不明な点はスタッフにお声がけください。
+      </div>
+    </div>,
+  ];
+
+  const STEP_LABELS=["基本情報","お薬・アレルギー","症状・生活習慣","副作用確認"];
+
+  return (
+    <div style={{maxWidth:600,margin:"0 auto",padding:"24px 16px"}}>
+      {/* プログレスバー */}
+      <div style={{display:"flex",gap:6,marginBottom:20}}>
+        {STEP_LABELS.map((s,i)=>(
+          <div key={i} style={{flex:1,textAlign:"center"}}>
+            <div style={{height:4,borderRadius:2,background:i<=step?C.teal:C.border,marginBottom:4,transition:"background .3s"}}/>
+            <span style={{fontSize:10,color:i===step?C.teal:C.light,fontWeight:i===step?600:400}}>{s}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{...S.card,padding:"22px 24px"}}>
+        {steps[step]}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:20,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+          <button style={S.btnOutline} onClick={()=>setStep(s=>Math.max(0,s-1))} disabled={step===0}>← 戻る</button>
+          <span style={{fontSize:12,color:C.light}}>{step+1} / 4</span>
+          {step<3
+            ?<button style={S.btnPrimary} onClick={()=>setStep(s=>s+1)}>次へ →</button>
+            :<button style={S.btnPrimary} onClick={()=>onSubmit(f)}>✓ 送信する</button>
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── 薬剤師ダッシュボード ──────────────── */
+function PharmacistDashboard({patients,selId,onSelect,onSwitchToGuidance,onExportAll}){
+  const [search,setSearch]=useState("");
+  const filtered=useMemo(()=>{
+    if(!search.trim())return patients;
+    const q=search.trim().toLowerCase();
+    return patients.filter(p=>p.name.includes(q)||p.kana.toLowerCase().includes(q)||p.no.toLowerCase().includes(q));
+  },[patients,search]);
+
+  const pt=patients.find(p=>p.id===selId);
+
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"240px 1fr",height:"calc(100vh - 60px)"}}>
+      {/* サイドバー：患者リスト */}
+      <div style={{borderRight:`1px solid ${C.border}`,background:C.white,display:"flex",flexDirection:"column"}}>
+        <div style={{padding:"12px 12px 8px"}}>
+          <input
+            style={{...S.input,fontSize:13,padding:"8px 11px"}}
+            placeholder="患者名・番号で検索..."
+            value={search}
+            onChange={e=>setSearch(e.target.value)}
+          />
+        </div>
+        <div style={{padding:"4px 12px 6px"}}>
+          <span style={{fontSize:11,color:C.light,fontWeight:600,letterSpacing:"0.05em"}}>
+            本日来局 — {patients.length}名
+          </span>
+        </div>
+        <div style={{flex:1,overflowY:"auto",padding:"0 8px 12px"}}>
+          {filtered.map(p=>(
+            <div
+              key={p.id}
+              onClick={()=>onSelect(p.id)}
+              style={{padding:"10px 10px",borderRadius:10,marginBottom:4,cursor:"pointer",
+                background:selId===p.id?C.tealL:"transparent",
+                border:`1px solid ${selId===p.id?C.tealB:"transparent"}`,
+                transition:"all .15s"}}
+            >
+              <div style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:2}}>{p.name}</div>
+              <div style={{fontSize:11,color:C.light}}>{p.no} · {p.age}歳 · {p.gender}</div>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
+                {p.q.done
+                  ?<span style={S.badge("ok")}>問診済</span>
+                  :<span style={S.badge("warn")}>問診待ち</span>
+                }
+                {p.allergy!=="なし"&&<span style={S.badge("danger")}>アレルギー</span>}
+                {p.visitCount>1&&<span style={S.badge("blue")}>再来局</span>}
+                {p.guid&&<span style={S.badge("ok")}>指導済</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{padding:"10px 12px",borderTop:`1px solid ${C.border}`}}>
+          <button style={{...S.btnAccent,width:"100%",justifyContent:"center",fontSize:12,padding:"8px"}} onClick={onExportAll}>
+            NSIPS 全患者 CSV出力
+          </button>
+        </div>
+      </div>
+
+      {/* メインエリア */}
+      <div style={{background:C.bg,overflowY:"auto",padding:"18px 20px"}}>
+        {!pt?(
+          <div style={{...S.card,padding:"60px 32px",textAlign:"center",color:C.light}}>
+            <div style={{fontSize:36,marginBottom:14}}>👈</div>
+            <div style={{fontSize:15,fontWeight:600}}>患者を選択してください</div>
+          </div>
+        ):(
+          <>
+            {/* 患者ヘッダ */}
+            <div style={{...S.card,padding:"16px 20px",marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                <div>
+                  <div style={{fontSize:20,fontWeight:700,color:C.text}}>{pt.name}</div>
+                  <div style={{fontSize:12,color:C.mid,marginTop:3}}>{pt.kana} ／ {pt.age}歳 · {pt.gender} ／ {pt.no}</div>
+                  <div style={{fontSize:12,color:C.light,marginTop:2}}>生年月日：{pt.bday} ／ 前回来局：{pt.lastVisit}</div>
+                </div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  {pt.allergy!=="なし"&&(
+                    <div style={{background:C.dangerL,border:`1px solid ${C.dangerB}`,borderRadius:9,padding:"6px 12px",color:"#A32D2D",fontSize:12,fontWeight:600}}>
+                      ⚠ アレルギー：{pt.allergy}
+                    </div>
+                  )}
+                  <button style={{...S.btnGray,fontSize:12,padding:"7px 14px"}} onClick={()=>dlCSV(buildCSV([pt]),`NSIPS_${now8()}_${pt.no}.csv`)}>
+                    CSV出力
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* 統計カード */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:12}}>
+              {[
+                {label:"来局回数",val:`${pt.visitCount}回`,color:C.blue},
+                {label:"前回来局",val:pt.lastVisit?.slice(5)||"—",color:C.text},
+                {label:"加算取得",val:"2件",color:C.teal},
+                {label:"アレルギー",val:pt.allergy!=="なし"?"要注意":"なし",color:pt.allergy!=="なし"?C.amber:C.teal},
+              ].map(({label,val,color})=>(
+                <div key={label} style={{background:C.white,border:`0.5px solid ${C.border}`,borderRadius:10,padding:"11px 13px"}}>
+                  <div style={{fontSize:11,color:C.light,marginBottom:4}}>{label}</div>
+                  <div style={{fontSize:18,fontWeight:600,color}}>{val}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* 問診内容（全項目） */}
+            <div style={{...S.card,padding:"14px 18px",marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <span style={{fontSize:13,fontWeight:600,color:C.text}}>問診内容（全項目）</span>
+                {!pt.q.done&&<span style={{fontSize:12,color:C.amber,fontWeight:600}}>⚠ 未記入</span>}
+              </div>
+              {!pt.q.done?(
+                <div style={{background:C.amberL,border:`1px solid ${C.amberB}`,borderRadius:9,padding:"10px 13px",color:C.amber,fontSize:13}}>
+                  まだ問診票が記入されていません。患者様にタブレットをお渡しください。
+                </div>
+              ):(
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                  {[
+                    ["主訴",pt.symptoms],
+                    ["アレルギー",pt.allergy],
+                    ["服用中の薬",pt.meds],
+                    ["飲酒",pt.q.alc],
+                    ["喫煙",pt.q.smk],
+                    ["妊娠の可能性",pt.q.prg],
+                    ["前回副作用",pt.q.se],
+                    ["市販薬",pt.q.otc||"—"],
+                  ].map(([l,v])=>(
+                    <div key={l} style={{background:C.bg,borderRadius:8,padding:"9px 11px"}}>
+                      <div style={{fontSize:11,color:C.light,marginBottom:3}}>{l}</div>
+                      <div style={{fontSize:13,fontWeight:600,color:l==="アレルギー"&&v!=="なし"?"#A32D2D":C.text}}>{v||"—"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 加算取得支援 */}
+            <div style={{...S.card,padding:"14px 18px",marginBottom:12}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.text,marginBottom:12}}>加算取得支援</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
+                {KAZAN.map((k,i)=>{
+                  const ok=i<2;
+                  return(
+                    <div key={k.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",borderRadius:9,
+                      background:ok?C.tealL:C.bg,border:`0.5px solid ${ok?C.tealB:C.border}`}}>
+                      <span style={{fontSize:12,fontWeight:ok?600:400,color:ok?C.tealM:C.light}}>{k.label}</span>
+                      <span style={{fontSize:11,padding:"2px 8px",borderRadius:8,background:ok?C.white:"transparent",
+                        border:ok?`0.5px solid ${C.tealB}`:"none",color:ok?C.tealM:C.light,fontWeight:ok?600:400}}>
+                        {ok?`${k.point} · 算定可`:"対象外"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 薬歴記載チェックリスト */}
+            <div style={{...S.card,padding:"14px 18px",marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <span style={{fontSize:13,fontWeight:600,color:C.text}}>薬歴記載チェックリスト</span>
+                <span style={{fontSize:11,color:C.light}}>{pt.guid?`${CHECKLIST.length}/${CHECKLIST.length} 完了`:"0 / 5 完了"}</span>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                {CHECKLIST.map((item,i)=>{
+                  const done=!!pt.guid||(i<4&&!!pt.guid);
+                  const last=i===4&&!pt.guid;
+                  return(
+                    <div key={item} style={{display:"flex",alignItems:"center",gap:9,fontSize:13,
+                      color:last?C.danger:pt.guid?C.light:C.text}}>
+                      <div style={{width:18,height:18,borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",
+                        background:pt.guid?C.teal:last?"transparent":C.bg,
+                        border:`1px solid ${pt.guid?C.teal:last?C.danger:C.border}`}}>
+                        {pt.guid&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>✓</span>}
+                      </div>
+                      <span style={{textDecoration:pt.guid?"line-through":"none",fontWeight:last?600:400}}>{item}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 投薬指導へ遷移 */}
+            <div style={{display:"flex",justifyContent:"flex-end"}}>
+              <button style={{...S.btnPrimary,padding:"12px 28px",fontSize:14}} onClick={()=>onSwitchToGuidance(pt.id)}>
+                投薬指導記録を開く →
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── 投薬指導記録 ────────────────────── */
+function GuidanceRecord({patient,initGuid,onSave,onBack}){
+  const [g,setG]=useState(initGuid||{tmpl:"",note:"",ses:{},ms:"",nf:"",kazan:{}});
+  const [saved,setSaved]=useState(false);
+  const sg=(k,v)=>setG(x=>({...x,[k]:v}));
+  const tse=(k)=>sg("ses",{...g.ses,[k]:!g.ses[k]});
+  const tkz=(k)=>sg("kazan",{...g.kazan,[k]:!g.kazan[k]});
+
+  const checkedCount=Object.values(g.ses).filter(Boolean).length;
+  const seList=Object.entries(g.ses).filter(([,v])=>v).map(([k])=>k).join("／");
+
+  const nsipsPreview=`I, ${patient.no}, ${now8()}, "${g.ms||""}", "${seList}", "${(g.note||"").slice(0,30)}${g.note?.length>30?"…":""}",  ${toD(g.nf)}`;
+
+  const handleSave=()=>{
+    onSave(g);
+    setSaved(true);
+    setTimeout(()=>setSaved(false),2500);
+  };
+
+  const handleSaveAndExport=()=>{
+    onSave(g);
+    const updatedPt={...patient,guid:g};
+    dlCSV(buildCSV([updatedPt]),`NSIPS_${now8()}_${patient.no}.csv`);
+    setSaved(true);
+    setTimeout(()=>setSaved(false),2500);
+  };
+
+  return(
+    <div style={{height:"calc(100vh - 60px)",display:"flex",flexDirection:"column",background:C.bg}}>
+      {/* 患者バー */}
+      <div style={{background:C.white,borderBottom:`1px solid ${C.border}`,padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <button style={{...S.btnGray,padding:"6px 14px",fontSize:12}} onClick={onBack}>← 戻る</button>
+          <div>
+            <span style={{fontWeight:600,fontSize:14,color:C.text}}>{patient.name}</span>
+            <span style={{fontSize:12,color:C.mid,marginLeft:10}}>{patient.no} · {patient.age}歳 · {patient.gender}</span>
+          </div>
+          {patient.allergy!=="なし"&&(
+            <div style={{background:C.dangerL,border:`1px solid ${C.dangerB}`,borderRadius:8,padding:"4px 10px",color:"#A32D2D",fontSize:12,fontWeight:600}}>
+              ⚠ {patient.allergy}
+            </div>
+          )}
+        </div>
+        <span style={{fontSize:12,color:C.light}}>投薬指導記録</span>
+      </div>
+
+      {/* 2カラムボディ */}
+      <div style={{flex:1,display:"grid",gridTemplateColumns:"1fr 1fr",overflow:"hidden"}}>
+        {/* 左：指導内容 */}
+        <div style={{overflowY:"auto",padding:"16px 18px",borderRight:`1px solid ${C.border}`}}>
+          <div style={{fontSize:13,fontWeight:600,color:C.text,marginBottom:12,paddingBottom:10,borderBottom:`1px solid ${C.border}`}}>
+            指導内容
+          </div>
+
+          <label style={S.label}>テンプレートを選択</label>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+            {TEMPLATES.map(t=>(
+              <button key={t.id} style={S.radioBtn(g.tmpl===t.id)} onClick={()=>{sg("tmpl",t.id);sg("note",t.text);}}>
+                {t.label}
+              </button>
+            ))}
+            <button style={S.radioBtn(g.tmpl==="custom")} onClick={()=>{sg("tmpl","custom");sg("note","");}}>
+              + カスタム
+            </button>
+          </div>
+
+          <label style={S.label}>指導メモ（編集可）</label>
+          <textarea
+            style={{...S.textarea,minHeight:100,marginBottom:14}}
+            value={g.note}
+            onChange={e=>sg("note",e.target.value)}
+            placeholder="指導内容を入力、またはテンプレートを選択してください..."
+            rows={5}
+          />
+
+          <label style={S.label}>服薬状況（アドヒアランス）</label>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+            {["良好","飲み忘れあり","自己中断あり","初回"].map(v=>(
+              <button key={v} style={S.radioBtn(g.ms===v)} onClick={()=>sg("ms",v)}>{v}</button>
+            ))}
+          </div>
+
+          <label style={S.label}>次回フォロー日</label>
+          <input style={{...S.input,marginBottom:14}} type="date" value={g.nf} onChange={e=>sg("nf",e.target.value)}/>
+
+          {/* NSIPSプレビュー */}
+          <div style={{background:C.amberL,border:`0.5px solid ${C.amberB}`,borderRadius:9,padding:"10px 13px"}}>
+            <div style={{fontSize:11,color:C.amber,fontWeight:600,marginBottom:5,letterSpacing:"0.04em"}}>NSIPS 出力プレビュー（I レコード）</div>
+            <div style={{fontFamily:"monospace",fontSize:11,color:C.mid,wordBreak:"break-all",lineHeight:1.6}}>
+              {nsipsPreview}
+            </div>
+          </div>
+        </div>
+
+        {/* 右：副作用・加算 */}
+        <div style={{overflowY:"auto",padding:"16px 18px"}}>
+          <div style={{fontSize:13,fontWeight:600,color:C.text,marginBottom:12,paddingBottom:10,borderBottom:`1px solid ${C.border}`}}>
+            副作用確認チェック
+            {checkedCount>0&&<span style={{...S.badge("danger"),marginLeft:8}}>{checkedCount}件確認</span>}
+          </div>
+
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
+            {SE_ITEMS.map(se=>{
+              const on=!!g.ses[se];
+              return(
+                <div key={se} onClick={()=>tse(se)} style={{display:"flex",alignItems:"center",gap:9,padding:"9px 11px",
+                  borderRadius:9,border:`1px solid ${on?C.dangerB:C.border}`,
+                  background:on?C.dangerL:C.white,cursor:"pointer",transition:"all .15s"}}>
+                  <div style={{width:18,height:18,borderRadius:4,border:`1.5px solid ${on?C.danger:C.border}`,
+                    background:on?C.danger:C.white,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    {on&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>✓</span>}
+                  </div>
+                  <span style={{fontSize:13,color:on?"#A32D2D":C.text,fontWeight:on?600:400}}>{se}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{fontSize:13,fontWeight:600,color:C.text,marginBottom:10,paddingBottom:8,borderBottom:`1px solid ${C.border}`}}>
+            加算取得確認
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:14}}>
+            {KAZAN.map((k,i)=>{
+              const eligible=i<2;
+              const checked=!!g.kazan[k.key];
+              return(
+                <div key={k.key} onClick={()=>eligible&&tkz(k.key)}
+                  style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 12px",
+                  borderRadius:9,background:checked?C.tealL:eligible?C.white:C.bg,
+                  border:`0.5px solid ${checked?C.tealB:eligible?C.border:C.border}`,
+                  cursor:eligible?"pointer":"default",opacity:eligible?1:.6}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    {eligible&&(
+                      <div style={{width:16,height:16,borderRadius:3,border:`1.5px solid ${checked?C.teal:C.border}`,
+                        background:checked?C.teal:C.white,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                        {checked&&<span style={{color:"#fff",fontSize:10,fontWeight:700}}>✓</span>}
+                      </div>
+                    )}
+                    <span style={{fontSize:12,fontWeight:eligible?500:400,color:eligible?C.text:C.light}}>{k.label}</span>
+                  </div>
+                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:8,
+                    background:eligible?C.white:"transparent",
+                    border:eligible?`0.5px solid ${checked?C.tealB:C.border}`:"none",
+                    color:eligible?checked?C.tealM:C.mid:C.light,fontWeight:eligible?600:400}}>
+                    {eligible?`${k.point} · 算定可`:"対象外"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 副作用フラグがある場合の注意 */}
+          {checkedCount>0&&(
+            <div style={{background:C.amberL,border:`0.5px solid ${C.amberB}`,borderRadius:9,padding:"10px 12px",fontSize:12,color:"#633806",lineHeight:1.6}}>
+              副作用が{checkedCount}件確認されています。次回フォロー時に経過を確認してください。
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* フッター */}
+      <div style={{background:C.white,borderTop:`1px solid ${C.border}`,padding:"12px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:12,color:C.light}}>
+          {saved
+            ?<span style={{color:C.teal,fontWeight:600}}>✓ 保存しました</span>
+            :<span>未保存 — 保存後に CSV出力が反映されます</span>
+          }
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button style={S.btnGray} onClick={()=>setG({tmpl:"",note:"",ses:{},ms:"",nf:"",kazan:{}})}>リセット</button>
+          <button style={S.btnOutline} onClick={handleSave}>記録を保存</button>
+          <button style={S.btnPrimary} onClick={handleSaveAndExport}>記録を保存 + NSIPS 出力</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── メインアプリ ─────────────────────── */
+function App(){
+  const [mode,setMode]=useState("patient"); // "patient" | "pharmacist" | "guidance"
+  const [submitted,setSubmitted]=useState(false);
+  const [patients,setPatients]=useState(INIT_PATIENTS);
+  const [selId,setSelId]=useState(null);
+  const [guidanceTarget,setGuidanceTarget]=useState(null);
+
+  const handleSaveGuidance=(id,g)=>{
+    setPatients(prev=>prev.map(p=>p.id===id?{...p,guid:g}:p));
+  };
+
+  const pt=patients.find(p=>p.id===guidanceTarget);
+
+  return(
+    <div style={{fontFamily:"inherit",background:C.bg,minHeight:"100vh",color:C.text}}>
+      {/* ヘッダ */}
+      <header style={{background:C.teal,height:60,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 24px",boxShadow:`0 2px 8px rgba(0,0,0,.1)`}}>
+        <div style={{fontSize:17,fontWeight:600,color:"#fff",letterSpacing:"0.03em"}}>
+          ファーマシー 問診・投薬支援
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {[["patient","患者モード"],["pharmacist","薬剤師モード"]].map(([m,l])=>(
+            <button key={m} onClick={()=>{setMode(m);setSubmitted(false);setGuidanceTarget(null);}}
+              style={{padding:"6px 16px",borderRadius:20,fontSize:13,fontWeight:600,border:"none",cursor:"pointer",
+                background:mode===m&&m!=="guidance"?"#fff":"rgba(255,255,255,.18)",
+                color:mode===m&&m!=="guidance"?C.teal:"#fff"}}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {/* 本体 */}
+      {mode==="patient"?(
+        submitted?(
+          <div style={{maxWidth:500,margin:"60px auto",padding:"0 16px"}}>
+            <div style={{...S.card,padding:"56px 32px",textAlign:"center"}}>
+              <div style={{fontSize:52,marginBottom:16}}>✅</div>
+              <div style={{fontSize:20,fontWeight:700,color:C.teal,marginBottom:10}}>問診票を送信しました</div>
+              <div style={{fontSize:14,color:C.mid,marginBottom:24,lineHeight:1.7}}>
+                しばらくお待ちください。<br/>薬剤師がご案内します。
+              </div>
+              <button style={S.btnOutline} onClick={()=>setSubmitted(false)}>最初に戻る</button>
+            </div>
+          </div>
+        ):<PatientMode onSubmit={()=>setSubmitted(true)}/>
+      ):mode==="pharmacist"?(
+        guidanceTarget&&pt?(
+          <GuidanceRecord
+            patient={pt}
+            initGuid={pt.guid}
+            onSave={(g)=>handleSaveGuidance(pt.id,g)}
+            onBack={()=>setGuidanceTarget(null)}
+          />
+        ):(
+          <PharmacistDashboard
+            patients={patients}
+            selId={selId}
+            onSelect={setSelId}
+            onSwitchToGuidance={(id)=>{setGuidanceTarget(id);}}
+            onExportAll={()=>dlCSV(buildCSV(patients),`NSIPS_${now8()}_ALL.csv`)}
+          />
+        )
+      ):null}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
