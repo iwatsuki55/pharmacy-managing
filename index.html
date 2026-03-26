@@ -645,6 +645,271 @@ function GuidanceRecord({patient,initGuid,onSave,onBack}){
   );
 }
 
+
+/* ─── OCR 問診モード ──────────────────────── */
+function OcrMode({onComplete,onBack}){
+  const [phase,setPhase]=useState("capture"); // capture | reviewing | done
+  const [imgData,setImgData]=useState(null);
+  const [imgFile,setImgFile]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState("");
+  const [parsed,setParsed]=useState({
+    name:"",age:"",gender:"",allergy:"",meds:"",otc:"",
+    symptoms:"",alc:"",smk:"",prg:"",se:"",seD:""
+  });
+  const [confidence,setConfidence]=useState({});
+  const fileRef=React.useRef();
+
+  const FIELDS=[
+    {key:"name",     label:"お名前",           type:"text",  placeholder:"山田 太郎"},
+    {key:"age",      label:"年齢",             type:"number",placeholder:"65"},
+    {key:"gender",   label:"性別",             type:"radio", options:["男性","女性","その他"]},
+    {key:"allergy",  label:"アレルギー",        type:"text",  placeholder:"なし"},
+    {key:"meds",     label:"服用中の薬",        type:"text",  placeholder:"なし"},
+    {key:"otc",      label:"市販薬・サプリ",    type:"radio", options:["なし","使用中あり"]},
+    {key:"symptoms", label:"主な症状・お悩み",  type:"textarea",placeholder:""},
+    {key:"alc",      label:"飲酒",             type:"radio", options:["なし","時々","毎日"]},
+    {key:"smk",      label:"喫煙",             type:"radio", options:["なし","過去あり","現在あり"]},
+    {key:"prg",      label:"妊娠の可能性",     type:"radio", options:["なし","あり","不明"]},
+    {key:"se",       label:"前回副作用",       type:"radio", options:["なし","あった"]},
+    {key:"seD",      label:"副作用の内容",     type:"text",  placeholder:""},
+  ];
+
+  const onFileChange=async(e)=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    setImgFile(file);
+    const reader=new FileReader();
+    reader.onload=ev=>setImgData(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const runOCR=async()=>{
+    if(!imgData)return;
+    setLoading(true);
+    setErr("");
+    try{
+      const base64=imgData.split(",")[1];
+      const mediaType=imgData.split(";")[0].split(":")[1];
+      const prompt=`以下は日本の調剤薬局で使われる手書きの問診票の画像です。
+画像から読み取れる情報を JSON 形式で返してください。
+読み取れない項目は空文字("")にし、不確かな項目のキーを "lowConfidence" 配列に入れてください。
+
+返すべきJSONのキーと内容：
+- name: 患者氏名（漢字・ひらがな・カタカナ）
+- age: 年齢（数字のみ）
+- gender: 性別（"男性" / "女性" / "その他" のどれか）
+- allergy: アレルギー（薬・食べ物。なければ"なし"）
+- meds: 現在服用中の薬（なければ"なし"）
+- otc: 市販薬・サプリ使用（"なし" / "使用中あり"）
+- symptoms: 主な症状・お悩み
+- alc: 飲酒（"なし" / "時々" / "毎日"）
+- smk: 喫煙（"なし" / "過去あり" / "現在あり"）
+- prg: 妊娠の可能性（"なし" / "あり" / "不明"）
+- se: 前回の副作用（"なし" / "あった"）
+- seD: 副作用の内容（seが"あった"場合のみ）
+- lowConfidence: 読み取りが不確かな項目のキー名の配列
+
+重要：JSONのみを返してください。説明文・マークダウン記法は不要です。`;
+
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:1000,
+          messages:[{
+            role:"user",
+            content:[
+              {type:"image",source:{type:"base64",media_type:mediaType,data:base64}},
+              {type:"text",text:prompt}
+            ]
+          }]
+        })
+      });
+      const data=await resp.json();
+      const raw=data.content?.[0]?.text||"";
+      const clean=raw.replace(/```json|```/g,"").trim();
+      const result=JSON.parse(clean);
+      const {lowConfidence=[],...fields}=result;
+      const confMap={};
+      lowConfidence.forEach(k=>{confMap[k]=true;});
+      setParsed(prev=>({...prev,...fields}));
+      setConfidence(confMap);
+      setPhase("reviewing");
+    }catch(e){
+      setErr("読み取りに失敗しました。画像を確認して再試行してください。\n詳細: "+e.message);
+    }
+    setLoading(false);
+  };
+
+  const set=(k,v)=>setParsed(p=>({...p,[k]:v}));
+
+  const allRequired=parsed.name&&parsed.age&&parsed.gender;
+
+  /* ── フェーズ: 撮影 ── */
+  if(phase==="capture") return(
+    <div style={{maxWidth:560,margin:"0 auto",padding:"24px 16px"}}>
+      <div style={{...S.card,padding:"24px 28px"}}>
+        <div style={{fontSize:16,fontWeight:600,color:C.text,marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
+          <span style={{width:30,height:30,borderRadius:"50%",background:C.amberL,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:16}}>📷</span>
+          手書き問診票 OCR 読み取り
+        </div>
+        <div style={{fontSize:13,color:C.mid,marginBottom:20,lineHeight:1.7}}>
+          手書きの問診票を撮影してください。AI が内容を読み取り、確認画面に自動入力します。
+        </div>
+
+        {/* アップロードエリア */}
+        <div
+          onClick={()=>fileRef.current.click()}
+          style={{border:`2px dashed ${imgData?C.teal:C.border}`,borderRadius:12,padding:"32px 20px",
+            textAlign:"center",cursor:"pointer",background:imgData?C.tealL:"#FAFCFC",
+            transition:"all .2s",marginBottom:16}}>
+          {imgData?(
+            <div>
+              <img src={imgData} alt="問診票" style={{maxWidth:"100%",maxHeight:300,borderRadius:8,marginBottom:12}}/>
+              <div style={{fontSize:13,color:C.tealM,fontWeight:600}}>画像を選択済み — タップで変更</div>
+            </div>
+          ):(
+            <div>
+              <div style={{fontSize:40,marginBottom:12}}>📄</div>
+              <div style={{fontSize:14,fontWeight:600,color:C.mid,marginBottom:6}}>ここをタップして画像を選択</div>
+              <div style={{fontSize:12,color:C.light}}>カメラ撮影 または ファイル選択</div>
+            </div>
+          )}
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" capture="environment"
+          style={{display:"none"}} onChange={onFileChange}/>
+
+        {/* 注意書き */}
+        <div style={{background:C.amberL,border:`1px solid ${C.amberB}`,borderRadius:9,
+          padding:"11px 14px",fontSize:12,color:"#633806",lineHeight:1.7,marginBottom:16}}>
+          ⚠ AI の読み取り結果は必ず薬剤師が確認・修正してください。<br/>
+          アレルギーや薬剤名は特に注意が必要です。
+        </div>
+
+        {err&&<div style={{background:C.dangerL,border:`1px solid ${C.dangerB}`,borderRadius:9,
+          padding:"10px 14px",fontSize:13,color:"#A32D2D",marginBottom:14,whiteSpace:"pre-wrap"}}>{err}</div>}
+
+        <div style={{display:"flex",justifyContent:"space-between"}}>
+          <button style={S.btnOutline} onClick={onBack}>← 戻る</button>
+          <button style={{...S.btnPrimary,opacity:(!imgData||loading)?0.4:1}}
+            onClick={runOCR} disabled={!imgData||loading}>
+            {loading?"読み取り中…":"AI で読み取る →"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ── フェーズ: 確認・修正 ── */
+  if(phase==="reviewing") return(
+    <div style={{maxWidth:680,margin:"0 auto",padding:"24px 16px"}}>
+      {/* 確認バナー */}
+      <div style={{background:C.amberL,border:`1px solid ${C.amberB}`,borderRadius:10,
+        padding:"12px 18px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:18}}>⚠️</span>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:"#633806"}}>AI 読み取り結果を必ず確認・修正してください</div>
+          <div style={{fontSize:12,color:"#854F0B",marginTop:2}}>
+            {Object.keys(confidence).length>0
+              ?`自信度が低い項目（黄色ハイライト）：${Object.keys(confidence).join("、")} — 特に注意して確認を`
+              :"すべての項目が読み取れました。内容を確認してください。"
+            }
+          </div>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"200px 1fr",gap:16,marginBottom:16}}>
+        {/* 原本サムネイル */}
+        <div style={{...S.card,padding:"12px"}}>
+          <div style={{fontSize:11,color:C.light,marginBottom:8,fontWeight:600}}>撮影画像（原本）</div>
+          <img src={imgData} alt="原本" style={{width:"100%",borderRadius:8}}/>
+          <button style={{...S.btnGray,width:"100%",marginTop:10,fontSize:12,padding:"7px"}}
+            onClick={()=>{setPhase("capture");setImgData(null);setImgFile(null);}}>
+            撮り直す
+          </button>
+        </div>
+
+        {/* 確認・編集フォーム */}
+        <div style={{...S.card,padding:"18px 20px"}}>
+          <div style={{fontSize:13,fontWeight:600,color:C.text,marginBottom:16,
+            paddingBottom:10,borderBottom:`1px solid ${C.border}`}}>
+            読み取り結果の確認・修正
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {FIELDS.map(({key,label,type,options,placeholder})=>{
+              const isLow=!!confidence[key];
+              const boxStyle={background:isLow?"#FFFBF0":C.white,
+                border:`1.5px solid ${isLow?C.amberB:C.border}`,
+                borderRadius:9,padding:"8px 10px"};
+              return(
+                <div key={key} style={{background:isLow?"#FFFBF0":"transparent",
+                  borderRadius:9,padding:isLow?"8px 10px":"0 2px",
+                  border:isLow?`1px solid ${C.amberB}`:"none"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+                    <label style={{...S.label,margin:0}}>{label}</label>
+                    {isLow&&<span style={{fontSize:10,background:C.amberL,color:C.amber,
+                      padding:"1px 6px",borderRadius:8,fontWeight:600}}>要確認</span>}
+                  </div>
+                  {type==="radio"?(
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {options.map(o=>(
+                        <button key={o} style={S.radioBtn(parsed[key]===o)} onClick={()=>set(key,o)}>{o}</button>
+                      ))}
+                    </div>
+                  ):type==="textarea"?(
+                    <textarea style={{...S.textarea,minHeight:60,
+                      border:`1.5px solid ${isLow?C.amberB:C.border}`,background:isLow?"#FFFBF0":"#FAFCFC"}}
+                      value={parsed[key]} onChange={e=>set(key,e.target.value)} placeholder={placeholder}/>
+                  ):(
+                    <input style={{...S.input,
+                      border:`1.5px solid ${isLow?C.amberB:C.border}`,background:isLow?"#FFFBF0":"#FAFCFC"}}
+                      type={type} value={parsed[key]} onChange={e=>set(key,e.target.value)} placeholder={placeholder}/>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* フッター操作 */}
+      <div style={{...S.card,padding:"14px 20px",display:"flex",
+        justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:12,color:C.light}}>
+          {allRequired
+            ?<span style={{color:C.teal,fontWeight:600}}>✓ 必須項目入力済み</span>
+            :<span style={{color:C.danger}}>氏名・年齢・性別は必須です</span>
+          }
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button style={S.btnGray} onClick={()=>setPhase("capture")}>← 撮り直す</button>
+          <button style={{...S.btnPrimary,opacity:allRequired?1:0.4}}
+            disabled={!allRequired}
+            onClick={()=>{onComplete({...parsed,done:true});setPhase("done");}}>
+            確認完了・保存 →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ── フェーズ: 完了 ── */
+  return(
+    <div style={{maxWidth:500,margin:"60px auto",padding:"0 16px"}}>
+      <div style={{...S.card,padding:"56px 32px",textAlign:"center"}}>
+        <div style={{fontSize:52,marginBottom:16}}>✅</div>
+        <div style={{fontSize:20,fontWeight:700,color:C.teal,marginBottom:10}}>問診票を取り込みました</div>
+        <div style={{fontSize:14,color:C.mid,marginBottom:24,lineHeight:1.7}}>
+          薬剤師ダッシュボードで内容を確認できます。
+        </div>
+        <button style={S.btnOutline} onClick={onBack}>ダッシュボードへ戻る</button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── メインアプリ ─────────────────────── */
 function App(){
   const [mode,setMode]=useState("patient"); // "patient" | "pharmacist" | "guidance"
@@ -667,11 +932,11 @@ function App(){
           ファーマシー 問診・投薬支援
         </div>
         <div style={{display:"flex",gap:6}}>
-          {[["patient","患者モード"],["pharmacist","薬剤師モード"]].map(([m,l])=>(
+          {[["patient","患者モード"],["pharmacist","薬剤師モード"],["ocr","OCR問診"]].map(([m,l])=>(
             <button key={m} onClick={()=>{setMode(m);setSubmitted(false);setGuidanceTarget(null);}}
               style={{padding:"6px 16px",borderRadius:20,fontSize:13,fontWeight:600,border:"none",cursor:"pointer",
-                background:mode===m&&m!=="guidance"?"#fff":"rgba(255,255,255,.18)",
-                color:mode===m&&m!=="guidance"?C.teal:"#fff"}}>
+                background:mode===m?"#fff":"rgba(255,255,255,.18)",
+                color:mode===m?C.teal:"#fff"}}>
               {l}
             </button>
           ))}
@@ -709,6 +974,24 @@ function App(){
             onExportAll={()=>dlCSV(buildCSV(patients),`NSIPS_${now8()}_ALL.csv`)}
           />
         )
+      ):mode==="ocr"?(
+        <OcrMode
+          onComplete={(q)=>{
+            const newId=Date.now();
+            setPatients(prev=>[...prev,{
+              id:newId, no:`P${String(prev.length+1).padStart(3,"0")}`,
+              name:q.name, kana:"", age:parseInt(q.age)||0,
+              gender:q.gender, bday:"",
+              allergy:q.allergy||"なし", meds:q.meds||"なし",
+              symptoms:q.symptoms||"", visitCount:1, lastVisit:now8().replace(/(\d{4})(\d{2})(\d{2})/,"$1-$2-$3"),
+              q:{done:true,alc:q.alc,smk:q.smk,prg:q.prg,se:q.se,otc:q.otc},
+              guid:null
+            }]);
+            setMode("pharmacist");
+            setSelId(newId);
+          }}
+          onBack={()=>setMode("pharmacist")}
+        />
       ):null}
     </div>
   );
