@@ -365,7 +365,7 @@ function PatientMode({onSubmit,visitType}){
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:10}}>
             <div>
               <label style={S.label}>薬名</label>
-              <input style={S.input} value={ff.sideEffectDrug} onChange={e=>setF("sideEffectDrug",e.target.value)} placeholder="例：ロキソニン"/>
+              <VoiceTA value={ff.sideEffectDrug} onChange={v=>setF("sideEffectDrug",v)} placeholder="例：ロキソニン" minH={50}/>
             </div>
             <div>
               <label style={S.label}>症状</label>
@@ -376,8 +376,7 @@ function PatientMode({onSubmit,visitType}){
       </Field>
       <Field label="アレルギーはありますか？（食べ物・花粉・アルコール等）">
         <RadioGroup value={ff.allergy} options={["なし","あり"]} onChange={v=>setF("allergy",v)}/>
-        <ConditionalInput show={ff.allergy==="あり"} value={ff.allergyDetail}
-          onChange={v=>setF("allergyDetail",v)} placeholder="例：卵、花粉、アルコール"/>
+        {ff.allergy==="あり"&&<div style={{marginTop:8}}><VoiceTA value={ff.allergyDetail} onChange={v=>setF("allergyDetail",v)} placeholder="例：卵、花粉、アルコール" minH={55}/></div>}
       </Field>
       <Field label="現在、治療中の病気や過去にかかった大きな病気はありますか？">
         <RadioGroup value={ff.pastHistory} options={["なし","あり"]} onChange={v=>setF("pastHistory",v)}/>
@@ -507,8 +506,7 @@ function PatientMode({onSubmit,visitType}){
           ))}
         </div>
         {rf.meds==="変更あり"&&(
-          <textarea style={{...S.textarea,minHeight:60}} value={rf.meds==="変更あり"?rf.medsDetail||"":""} 
-            onChange={e=>setR("medsDetail",e.target.value)} placeholder="変更内容を教えてください"/>
+          <VoiceTA value={rf.meds==="変更あり"?rf.medsDetail||"":""} onChange={v=>setR("medsDetail",v)} placeholder="変更内容を教えてください" minH={60}/>
         )}
       </div>
       <div style={{marginBottom:14}}>
