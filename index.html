@@ -136,6 +136,88 @@ function dlCSV(content,filename){
   URL.revokeObjectURL(url);
 }
 
+/* ─── 音声入力フック ────────────────────── */
+function useSpeech(onResult){
+  const [listening,setListening]=React.useState(false);
+  const [supported,setSupported]=React.useState(false);
+  const recRef=React.useRef(null);
+
+  React.useEffect(()=>{
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){setSupported(false);return;}
+    setSupported(true);
+    const rec=new SR();
+    rec.lang="ja-JP";
+    rec.continuous=false;
+    rec.interimResults=false;
+    rec.onresult=(e)=>{
+      const text=Array.from(e.results).map(r=>r[0].transcript).join("");
+      onResult(text);
+      setListening(false);
+    };
+    rec.onerror=()=>setListening(false);
+    rec.onend=()=>setListening(false);
+    recRef.current=rec;
+  },[]);
+
+  const toggle=()=>{
+    if(!recRef.current)return;
+    if(listening){recRef.current.stop();setListening(false);}
+    else{try{recRef.current.start();setListening(true);}catch(e){setListening(false);}}
+  };
+
+  return {listening,supported,toggle};
+}
+
+/* ─── マイクボタン ──────────────────────── */
+function MicBtn({onAppend}){
+  const {listening,supported,toggle}=useSpeech(onAppend);
+  if(!supported)return null;
+  return(
+    <button type="button" onClick={toggle}
+      title={listening?"録音停止":"マイクで入力（日本語）"}
+      style={{width:36,height:36,borderRadius:"50%",border:"none",cursor:"pointer",
+        flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",
+        background:listening?"#E24B4A":"#E1F5EE",transition:"background .2s"}}>
+      {listening
+        ?<span style={{width:11,height:11,borderRadius:2,background:"#fff",display:"block"}}/>
+        :<svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+            stroke="#1D9E75" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="2" width="6" height="12" rx="3"/>
+          <path d="M5 10a7 7 0 0014 0M12 19v4M8 23h8"/>
+        </svg>
+      }
+    </button>
+  );
+}
+
+/* ─── 音声対応テキストエリア ────────────── */
+function VoiceTA({value,onChange,placeholder,rows=3,minH=70}){
+  const append=(text)=>onChange(value+(value?"　":"")+text);
+  return(
+    <div>
+      <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+        <textarea
+          style={{...S.textarea,flex:1,minHeight:minH}}
+          value={value}
+          onChange={e=>onChange(e.target.value)}
+          placeholder={placeholder}
+          rows={rows}
+        />
+        <MicBtn onAppend={append}/>
+      </div>
+      <div style={{fontSize:11,color:C.light,marginTop:3,display:"flex",alignItems:"center",gap:4}}>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.light} strokeWidth="2" strokeLinecap="round">
+          <rect x="9" y="2" width="6" height="12" rx="3"/>
+          <path d="M5 10a7 7 0 0014 0"/>
+        </svg>
+        マイクボタンを押して話すと自動で入力されます
+      </div>
+    </div>
+  );
+}
+
+
 /* ─── 患者モード ─────────────────────── */
 /* ─── 問診モード切り替えバナー ──────────── */
 function VisitTypeBanner({visitType,onSwitch}){
@@ -287,7 +369,7 @@ function PatientMode({onSubmit,visitType}){
             </div>
             <div>
               <label style={S.label}>症状</label>
-              <input style={S.input} value={ff.sideEffectSymptom} onChange={e=>setF("sideEffectSymptom",e.target.value)} placeholder="例：発疹・じんましん"/>
+              <VoiceTA value={ff.sideEffectSymptom} onChange={v=>setF("sideEffectSymptom",v)} placeholder="例：発疹・じんましん" minH={50}/>
             </div>
           </div>
         )}
@@ -299,8 +381,7 @@ function PatientMode({onSubmit,visitType}){
       </Field>
       <Field label="現在、治療中の病気や過去にかかった大きな病気はありますか？">
         <RadioGroup value={ff.pastHistory} options={["なし","あり"]} onChange={v=>setF("pastHistory",v)}/>
-        <ConditionalInput show={ff.pastHistory==="あり"} value={ff.pastHistoryDetail}
-          onChange={v=>setF("pastHistoryDetail",v)} placeholder="例：高血圧、糖尿病、心疾患"/>
+        {ff.pastHistory==="あり"&&<div style={{marginTop:8}}><VoiceTA value={ff.pastHistoryDetail} onChange={v=>setF("pastHistoryDetail",v)} placeholder="例：高血圧、糖尿病、心疾患" minH={60}/></div>}
       </Field>
     </div>,
 
@@ -312,8 +393,7 @@ function PatientMode({onSubmit,visitType}){
       </div>
       <Field label="現在、他でもらっている薬や市販薬・サプリメントはありますか？">
         <RadioGroup value={ff.otherMeds} options={["なし","あり"]} onChange={v=>setF("otherMeds",v)}/>
-        <ConditionalInput show={ff.otherMeds==="あり"} value={ff.otherMedsDetail}
-          onChange={v=>setF("otherMedsDetail",v)} placeholder="例：アムロジピン 5mg（〇〇病院）、市販の胃薬"/>
+        {ff.otherMeds==="あり"&&<div style={{marginTop:8}}><VoiceTA value={ff.otherMedsDetail} onChange={v=>setF("otherMedsDetail",v)} placeholder="例：アムロジピン 5mg（〇〇病院）、市販の胃薬" minH={60}/></div>}
       </Field>
       <Field label="お薬手帳をお持ちですか？">
         <RadioGroup value={ff.okusuri}
@@ -451,8 +531,7 @@ function PatientMode({onSubmit,visitType}){
       </div>
       <div style={{marginBottom:14}}>
         <label style={S.label}>今日の主な症状・お悩み</label>
-        <textarea style={{...S.textarea,minHeight:70}} value={rf.symptoms}
-          onChange={e=>setR("symptoms",e.target.value)} placeholder="例：頭痛が続いている、血圧が高めと言われた"/>
+        <VoiceTA value={rf.symptoms} onChange={v=>setR("symptoms",v)} placeholder="例：頭痛が続いている、血圧が高めと言われた"/>
       </div>
       <div style={{marginBottom:14}}>
         <label style={S.label}>体調の変化（前回来局時と比べて）</label>
@@ -495,8 +574,7 @@ function PatientMode({onSubmit,visitType}){
           ))}
         </div>
         {rf.se==="あった"&&(
-          <textarea style={{...S.textarea,minHeight:60}} value={rf.seD}
-            onChange={e=>setR("seD",e.target.value)} placeholder="例：発疹が出た、胃がむかむかした"/>
+          <VoiceTA value={rf.seD} onChange={v=>setR("seD",v)} placeholder="例：発疹が出た、胃がむかむかした" minH={60}/>
         )}
       </div>
       <div style={{marginBottom:14}}>
@@ -1089,9 +1167,7 @@ function GuidanceRecord({patient,initGuid,onSave,onBack}){
               onClick={()=>{sg("tmpl","custom");sg("note","");}}>+ カスタム</button>
           </div>
           <label style={S.label}>指導メモ（編集可）</label>
-          <textarea style={{...S.textarea,minHeight:100,marginBottom:14}} value={g.note}
-            onChange={e=>sg("note",e.target.value)}
-            placeholder="指導内容を入力、またはテンプレートを選択..." rows={5}/>
+          <div style={{marginBottom:14}}><VoiceTA value={g.note} onChange={v=>sg("note",v)} placeholder="指導内容を入力、またはテンプレートを選択..." minH={100}/></div>
           <label style={S.label}>服薬状況（アドヒアランス）</label>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
             {["良好","飲み忘れあり","自己中断あり","初回"].map(v=>(
